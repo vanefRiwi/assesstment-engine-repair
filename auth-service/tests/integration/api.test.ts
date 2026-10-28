@@ -49,6 +49,13 @@ describe("auth-service HTTP API", () => {
       );
     });
 
+    it("rejects unexpected login fields", async () => {
+      const res = await request(ctx.app)
+        .post("/api/v1/auth/login")
+        .send({ email: "admin@example.com", password: "admin-pass-1", role: "ADMIN" });
+      expect(res.status).toBe(422);
+    });
+
     it("returns 400 for malformed JSON", async () => {
       const res = await request(ctx.app)
         .post("/api/v1/auth/login")
@@ -75,6 +82,14 @@ describe("auth-service HTTP API", () => {
   });
 
   describe("/api/v1/users", () => {
+    it("rejects unexpected fields when creating a user", async () => {
+      const res = await request(ctx.app)
+        .post("/api/v1/users")
+        .set("Authorization", `Bearer ${adminToken}`)
+        .send({ name: "Unexpected", email: "unexpected@example.com", password: "new-pass-123", role: "OPERATOR", is_active: true });
+      expect(res.status).toBe(422);
+    });
+
     it("lets an admin create a user and rejects duplicates", async () => {
       const body = { name: "New Op", email: "new@example.com", password: "new-pass-123", role: "OPERATOR" };
 

@@ -36,6 +36,20 @@ describe("JwtTokenService", () => {
     expect(() => service.verify(token)).toThrow(UnauthorizedError);
   });
 
+  it("rejects signed tokens that omit required expiration and token ID claims", () => {
+    const token = jwt.sign(
+      { role: "ADMIN" },
+      testJwtSettings.privateKey,
+      {
+        algorithm: "RS256",
+        issuer: testJwtSettings.issuer,
+        audience: testJwtSettings.audience,
+        subject: userId,
+      },
+    );
+    expect(() => service.verify(token)).toThrow(UnauthorizedError);
+  });
+
   it("rejects a wrong audience and unsigned tokens", () => {
     const wrongAudience = new JwtTokenService({ ...testJwtSettings, audience: "other-api" });
     expect(() => service.verify(wrongAudience.issue({ sub: userId, role: "ADMIN" }).accessToken)).toThrow(
