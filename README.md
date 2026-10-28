@@ -155,7 +155,7 @@ flowchart LR
 - `e2e` construye las imágenes, levanta el stack completo como entorno de pruebas y ejecuta
   `scripts/smoke-test.sh`. Si falla, muestra los logs.
 - `publish-images` solo corre en `main` y publica las tres imágenes en GitHub Container Registry
-  (`ghcr.io/<owner>/engine-repair-<servicio>`) con la etiqueta del commit y `latest`.
+  (`ghcr.io/<owner>/assesstment-engine-repair/<servicio>`) con la etiqueta del commit y `latest`.
 
 Ningún secreto vive en el repositorio. Las pruebas generan llaves temporales y el registro usa el
 `GITHUB_TOKEN` del propio flujo. La evidencia de ejecución queda en la pestaña **Actions** del repositorio.
