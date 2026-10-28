@@ -79,8 +79,12 @@ Requisitos: Docker con Compose v2.
 
 ```bash
 cp .env.example .env        # opcional: cambia contraseñas y el admin inicial
-docker compose up -d --build
+docker compose up -d
 ```
+
+Las imágenes de la aplicación siempre se construyen desde el código (`pull_policy: build`), así que Compose
+no intenta descargarlas de ningún registro. La primera vez tarda unos minutos porque instala dependencias;
+las siguientes reutilizan la caché y arrancan en segundos. Para ver el estado: `docker compose ps`.
 
 Al arrancar, Compose:
 

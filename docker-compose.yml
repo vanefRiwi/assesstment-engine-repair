@@ -1,6 +1,7 @@
 name: engine-repair
 
 # Local / test environment. Values come from .env (see .env.example); defaults are dev placeholders only.
+# App images are always built from source (pull_policy: build), so Compose never tries to pull them.
 
 services:
   postgres:
@@ -44,6 +45,7 @@ services:
   auth-service:
     build: ./auth-service
     image: ${IMAGE_PREFIX:-engine-repair}/auth-service:${IMAGE_TAG:-local}
+    pull_policy: build
     environment:
       NODE_ENV: production
       AUTH_PORT: 3001
@@ -80,6 +82,7 @@ services:
   business-service:
     build: ./business-service
     image: ${IMAGE_PREFIX:-engine-repair}/business-service:${IMAGE_TAG:-local}
+    pull_policy: build
     environment:
       BUSINESS_PORT: 8000
       BUSINESS_DATABASE_URL: postgresql://business_user:${BUSINESS_DB_PASSWORD:-change_me_business}@postgres:5432/business_db
@@ -110,6 +113,7 @@ services:
         VITE_AUTH_API_URL: http://localhost:3001/api/v1
         VITE_BUSINESS_API_URL: http://localhost:8000/api/v1
     image: ${IMAGE_PREFIX:-engine-repair}/frontend:${IMAGE_TAG:-local}
+    pull_policy: build
     ports:
       - "5173:8080"
     depends_on:
