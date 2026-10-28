@@ -1,0 +1,124 @@
+name: engine-repair
+
+# Local / test environment. Values come from .env (see .env.example); defaults are dev placeholders only.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_postgres}
+      AUTH_DB_PASSWORD: ${AUTH_DB_PASSWORD:-change_me_auth}
+      BUSINESS_DB_PASSWORD: ${BUSINESS_DB_PASSWORD:-change_me_business}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/postgres/init-databases.sh:/docker-entrypoint-initdb.d/10-init-databases.sh:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  jwt-keys:
+    image: node:22-alpine
+    user: "1000:1000"
+    command: ["node", "/scripts/generate-jwt-keys.mjs"]
+    volumes:
+      - ./docker/generate-jwt-keys.mjs:/scripts/generate-jwt-keys.mjs:ro
+      - jwt-private:/keys/private
+      - jwt-public:/keys/public
+    depends_on:
+      jwt-volumes:
+        condition: service_completed_successfully
+
+  # Named volumes are created as root; hand them to uid 1000 (the node user) once.
+  jwt-volumes:
+    image: node:22-alpine
+    command: ["sh", "-c", "chown 1000:1000 /keys/private /keys/public && chmod 700 /keys/private"]
+    volumes:
+      - jwt-private:/keys/private
+      - jwt-public:/keys/public
+
+  auth-service:
+    build: ./auth-service
+    image: ${IMAGE_PREFIX:-engine-repair}/auth-service:${IMAGE_TAG:-local}
+    environment:
+      NODE_ENV: production
+      AUTH_PORT: 3001
+      AUTH_DATABASE_URL: postgresql://auth_user:${AUTH_DB_PASSWORD:-change_me_auth}@postgres:5432/auth_db
+      JWT_PRIVATE_KEY_PATH: /run/keys/jwt-private.pem
+      JWT_KEY_ID: ${JWT_KEY_ID:-local-dev-key-1}
+      JWT_ISSUER: engine-repair-auth
+      JWT_AUDIENCE: engine-repair-api
+      JWT_EXPIRES_IN_SECONDS: 900
+      CORS_ORIGINS: http://localhost:5173
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Administrator}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-admin@example.com}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-ChangeMe-Admin-2026}
+    # Migrate, create the first admin if none exists, then serve.
+    command:
+      - sh
+      - -c
+      - node dist/infrastructure/database/migrate.js && node dist/scripts/bootstrap-admin.js && node dist/server.js
+    volumes:
+      - jwt-private:/run/keys:ro
+    ports:
+      - "3001:3001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      jwt-keys:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/health || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  business-service:
+    build: ./business-service
+    image: ${IMAGE_PREFIX:-engine-repair}/business-service:${IMAGE_TAG:-local}
+    environment:
+      BUSINESS_PORT: 8000
+      BUSINESS_DATABASE_URL: postgresql://business_user:${BUSINESS_DB_PASSWORD:-change_me_business}@postgres:5432/business_db
+      JWT_PUBLIC_KEY_PATH: /run/keys/jwt-public.pem
+      JWT_ISSUER: engine-repair-auth
+      JWT_AUDIENCE: engine-repair-api
+      JWT_ALLOWED_ALGORITHM: RS256
+      CORS_ORIGINS: http://localhost:5173
+    volumes:
+      - jwt-public:/run/keys:ro
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      jwt-keys:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        VITE_AUTH_API_URL: http://localhost:3001/api/v1
+        VITE_BUSINESS_API_URL: http://localhost:8000/api/v1
+    image: ${IMAGE_PREFIX:-engine-repair}/frontend:${IMAGE_TAG:-local}
+    ports:
+      - "5173:8080"
+    depends_on:
+      auth-service:
+        condition: service_healthy
+      business-service:
+        condition: service_healthy
+
+volumes:
+  postgres-data:
+  jwt-private:
+  jwt-public:
