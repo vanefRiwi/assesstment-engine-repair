@@ -62,7 +62,7 @@ Authorization: Bearer <signed-jwt>
 
 | Capability | ADMIN | OPERATOR | Unauthenticated |
 |---|---:|---:|---:|
-| Register account, if public registration is enabled | Yes | Yes | Yes, subject to registration policy |
+| Create user account | Yes | No | No |
 | List users | Yes | No | No |
 | Read current user's profile | Yes | Yes | No |
 | Change a user's active status | Yes | No | No |
@@ -75,27 +75,29 @@ Authorization: Bearer <signed-jwt>
 
 Rules:
 - Backend APIs enforce authorization; frontend navigation is not a security boundary.
-- Callers cannot assign themselves `ADMIN`.
-- If public registration is enabled, new users default to `OPERATOR`. Admin accounts require an admin-controlled process or controlled bootstrap.
+- Public self-registration is disabled in the initial scope.
+- Only an authenticated `ADMIN` may create user accounts. The server validates the requested role against `ADMIN` and `OPERATOR`; an operator cannot create users or elevate privileges.
+- The first administrator is provisioned through a controlled bootstrap procedure, not a public endpoint.
 - Health output must not expose secrets, configuration values, or internal infrastructure details.
 - If assessment requirements demand more restrictive permissions, update this matrix before implementation.
 
 ## 4. Express authentication endpoints
 
-### `POST /api/v1/auth/register`
+### `POST /api/v1/users`
 
-Register a user if public registration is enabled.
+Create a user account. Requires an authenticated `ADMIN` token. Public self-registration is not available in the initial scope.
 
 Request:
 ```json
 {
   "name": "Example Operator",
   "email": "operator@example.com",
-  "password": "<provided-by-user>"
+  "password": "<provided-by-admin>",
+  "role": "OPERATOR"
 }
 ```
 
-The caller does not supply a trusted role; the service assigns `OPERATOR`. Return `201 Created` on success and `409 Conflict` if the normalized email already exists. If registration is admin-only instead, require an admin token and document that policy before implementation.
+The service validates the requested role (`ADMIN` or `OPERATOR`), normalizes the email, hashes the password, and never returns the password or hash. Return `201 Created` on success, `401 Unauthorized` for missing/invalid authentication, `403 Forbidden` for a non-admin caller, `409 Conflict` if the normalized email already exists, and `422 Unprocessable Content` for invalid fields. The first administrator is created through a controlled bootstrap procedure outside this endpoint.
 
 ### `POST /api/v1/auth/login`
 
@@ -198,6 +200,8 @@ Create repair order:
 
 The server generates `id`, `order_number`, initial status, and audit timestamps. The initial status is `RECEIVED`; creating the order and its first history record is one transaction. The engine/client pair must satisfy the ownership integrity rule in `docs/data-model.md`.
 
+Approval state is part of the repair-order resource. The initial scope does not expose a separate approval-history endpoint; the business service must validate and persist approval changes consistently. The exact route and request schema for recording a client decision should be finalized alongside implementation, without bypassing the approval gate.
+
 Change status:
 ```json
 {
@@ -206,7 +210,7 @@ Change status:
 }
 ```
 
-The business use case validates the transition, updates the order's current status, and inserts a history row atomically. Invalid transitions are rejected. Transition from `AWAITING_APPROVAL` to `IN_REPAIR` is blocked until approval is represented and recorded; the minimal model still needs a decision on how approval is persisted.
+The business use case validates the transition, updates the order's current status, and inserts a history row atomically. Invalid transitions are rejected. Approval is stored on `repair_orders` using `approval_status`, `approved_at`, and `approval_notes`. When approval is required, set `approval_status` to `PENDING`; only `APPROVED` permits transition from `AWAITING_APPROVAL` to `IN_REPAIR`. `NOT_REQUIRED` is reserved for orders that do not require client approval.
 
 Example repair-order response:
 ```json
@@ -221,7 +225,7 @@ Example repair-order response:
 }
 ```
 
-Payloads are illustrative. Exact response schemas and pagination fields must be finalized before endpoint implementation.
+Payloads are illustrative. Exact response schemas and pagination fields must be finalized before endpoint implementation. The repair-order create/response schemas should expose `approval_status`, `approved_at`, and `approval_notes` where appropriate.
 
 ## 6. HTTP status codes
 
