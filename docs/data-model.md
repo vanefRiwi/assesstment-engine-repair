@@ -1,103 +1,106 @@
 # Business Data Model
 
-## 1. Scope and ownership
+## 1. Scope and service ownership
 
-This document defines the initial relational model for the Engine Repair Assessment.
+The relational model is split by service ownership:
 
-The model is split by service ownership:
-- **Authentication database:** `users`, owned exclusively by the Express authentication service.
-- **Business database:** `clients`, `engines`, `repair_orders`, and `repair_status_history`, owned exclusively by the FastAPI business service.
+- **Authentication database (Express):** `users`.
+- **Business database (FastAPI):** `clients`, `engines`, `repair_orders`, and `repair_status_history`.
 
-No cross-database foreign key is created between users and business tables.
+There are no cross-database foreign keys. The business service must not query the authentication database. UUIDs are used as primary identifiers, and timestamps are timezone-aware PostgreSQL `TIMESTAMPTZ` values stored consistently in UTC.
+
+Types below are logical PostgreSQL recommendations. Concrete SQLModel declarations and Alembic migrations are implementation work and are not part of this documentation change.
 
 ## 2. Entities and fields
 
-The following field types are logical PostgreSQL recommendations. Exact SQLModel declarations, nullability, indexes, and migration details will be finalized during implementation.
-
 ### 2.1 `users` — authentication database
 
-| Field | Suggested type | Rule / purpose |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `name` | VARCHAR | Required |
-| `email` | VARCHAR | Required; unique |
-| `password_hash` | VARCHAR | Required; secure password hash only |
-| `role` | VARCHAR or PostgreSQL ENUM | Required; initial roles: `ADMIN`, `OPERATOR` |
-| `is_active` | BOOLEAN | Required; default true |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+| Field | Suggested type | Nullability / constraint | Purpose |
+|---|---|---|---|
+| `id` | UUID | PK, required | User identifier |
+| `name` | VARCHAR(120) | Required | Display name |
+| `email` | VARCHAR(254) | Required, unique | Login identifier; normalize consistently before saving |
+| `password_hash` | VARCHAR(255) | Required | Secure password hash only |
+| `role` | VARCHAR(20) | Required; `ADMIN` or `OPERATOR` | Authorization role |
+| `is_active` | BOOLEAN | Required, default true | Account activation |
+| `created_at` | TIMESTAMPTZ | Required | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Required | Last update timestamp |
 
-Email uniqueness should be enforced in the database. Passwords must never be stored in plaintext.
+Normalize email consistently (for example, trim whitespace and lowercase) and enforce uniqueness in the database. Never store plaintext passwords; use Argon2id or another approved modern password-hashing algorithm. Public registration, if supported, defaults to `OPERATOR`; callers cannot assign themselves `ADMIN`.
 
 ### 2.2 `clients` — business database
 
-| Field | Suggested type | Rule / purpose |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `name` | VARCHAR | Required |
-| `document_type` | VARCHAR | Required |
-| `document_number` | VARCHAR | Required |
-| `email` | VARCHAR | Contact information; nullability to be confirmed |
-| `is_active` | BOOLEAN | Required; default true |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+| Field | Suggested type | Nullability / constraint | Purpose |
+|---|---|---|---|
+| `id` | UUID | PK, required | Client identifier |
+| `name` | VARCHAR(150) | Required | Full name or business name |
+| `document_type` | VARCHAR(20) | Required | Identification type |
+| `document_number` | VARCHAR(40) | Required | Identification number |
+| `email` | VARCHAR(254) | Optional | Contact email |
+| `phone` | VARCHAR(30) | Optional | Contact phone |
+| `is_active` | BOOLEAN | Required, default true | Logical activation |
+| `created_at` | TIMESTAMPTZ | Required | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Required | Last update timestamp |
 
-Integrity rule: the pair `(document_type, document_number)` must be unique.
+Integrity rule: the pair `(document_type, document_number)` is unique. Normalize these fields consistently if business rules require ignoring whitespace/case differences.
 
 ### 2.3 `engines` — business database
 
-| Field | Suggested type | Rule / purpose |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `serial_number` | VARCHAR | Required; unique |
-| `manufacturer` | VARCHAR | Required |
-| `model` | VARCHAR | Required |
-| `engine_type` | VARCHAR | Required |
-| `capacity` | VARCHAR | Capacity/specification with units, if applicable |
-| `client_id` | UUID | Required foreign key to `clients.id` |
-| `registered_at` | TIMESTAMPTZ | Registration timestamp |
-| `is_active` | BOOLEAN | Required; default true |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+| Field | Suggested type | Nullability / constraint | Purpose |
+|---|---|---|---|
+| `id` | UUID | PK, required | Engine identifier |
+| `serial_number` | VARCHAR(100) | Required, unique | Manufacturer/serial identification |
+| `manufacturer` | VARCHAR(100) | Required | Manufacturer |
+| `model` | VARCHAR(100) | Required | Model |
+| `engine_type` | VARCHAR(60) | Required | Engine type |
+| `capacity` | VARCHAR(60) | Optional | Capacity/specification; units may be included in the description |
+| `client_id` | UUID | Required FK to `clients.id` | Current owner/client |
+| `registered_at` | TIMESTAMPTZ | Required | Registration timestamp |
+| `is_active` | BOOLEAN | Required, default true | Logical activation |
+| `created_at` | TIMESTAMPTZ | Required | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Required | Last update timestamp |
 
-Integrity rules:
-- `serial_number` must be unique.
-- `client_id` must reference an existing client.
-- Prefer logical deactivation over physical deletion when records are referenced by repair orders.
+Integrity rules: serial number is unique and `client_id` references an existing client. Add a unique constraint on `(id, client_id)` to support the composite reference from repair orders. Prefer logical deactivation over physical deletion when an engine is referenced by orders.
 
 ### 2.4 `repair_orders` — business database
 
-| Field | Suggested type | Rule / purpose |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `order_number` | VARCHAR | Required; unique |
-| `engine_id` | UUID | Required foreign key to `engines.id` |
-| `client_id` | UUID | Required foreign key to `clients.id` |
-| `received_at` | TIMESTAMPTZ | Required |
-| `reported_problem` | TEXT | Required |
-| `technical_diagnosis` | TEXT | Optional until diagnosed |
-| `repair_description` | TEXT | Optional until work is defined/performed |
-| `technician_name` | VARCHAR | Technician reference; can be plain text for the initial scope |
-| `estimated_delivery_at` | TIMESTAMPTZ | Optional |
-| `actual_delivery_at` | TIMESTAMPTZ | Optional until delivered |
-| `status` | VARCHAR or PostgreSQL ENUM | Required current status |
-| `observations` | TEXT | Optional |
-| `created_at` | TIMESTAMPTZ | Creation timestamp |
-| `updated_at` | TIMESTAMPTZ | Last update timestamp |
+| Field | Suggested type | Nullability / constraint | Purpose |
+|---|---|---|---|
+| `id` | UUID | PK, required | Internal order identifier |
+| `order_number` | VARCHAR(30) | Required, unique | Human-readable reference, e.g. `REP-2026-000001` |
+| `engine_id` | UUID | Required | Engine being repaired |
+| `client_id` | UUID | Required | Client associated with the order |
+| `received_at` | TIMESTAMPTZ | Required | Date/time received |
+| `reported_problem` | TEXT | Required | Problem reported by client |
+| `technical_diagnosis` | TEXT | Optional | Diagnosis |
+| `repair_description` | TEXT | Optional | Work planned/performed |
+| `technician_name` | VARCHAR(120) | Optional | Technician name for initial scope |
+| `estimated_delivery_at` | TIMESTAMPTZ | Optional | Estimated delivery |
+| `actual_delivery_at` | TIMESTAMPTZ | Optional | Actual delivery, when delivered |
+| `status` | VARCHAR(30) | Required; controlled values | Current lifecycle status |
+| `observations` | TEXT | Optional | Additional notes |
+| `created_at` | TIMESTAMPTZ | Required | Creation timestamp |
+| `updated_at` | TIMESTAMPTZ | Required | Last update timestamp |
 
-The model retains both `engine_id` and `client_id` to represent the requested order details. The application and database must prevent an order from referencing a client different from the engine's owner. One robust relational approach is a composite foreign key from `(engine_id, client_id)` to a matching unique pair on `engines`; another implementation may use an equivalent explicit integrity mechanism. This constraint must not be left solely to frontend validation.
+Keep both `engine_id` and `client_id` because the order explicitly represents the client and engine. The database must prevent an order from referencing a client different from the engine's current owner. Recommended relational enforcement:
+1. Add a unique constraint on `engines(id, client_id)`.
+2. Add a composite foreign key from `repair_orders(engine_id, client_id)` to `engines(id, client_id)`.
+
+This means changing an engine's owner requires considering existing orders. The policy for ownership changes must preserve historical order correctness; do not silently rewrite old orders. If the assessment later requires ownership transfers, revisit whether orders should capture the owner at order creation and how to represent that invariant.
+
+The human-readable `order_number` must be generated safely under concurrent requests. UUID remains the primary key; the readable number is a unique business reference.
 
 ### 2.5 `repair_status_history` — business database
 
-| Field | Suggested type | Rule / purpose |
-|---|---|---|
-| `id` | UUID | Primary key |
-| `repair_order_id` | UUID | Required foreign key to `repair_orders.id` |
-| `status` | VARCHAR or PostgreSQL ENUM | Required status recorded |
-| `changed_at` | TIMESTAMPTZ | Required timestamp |
-| `observations` | TEXT | Optional note explaining the transition |
+| Field | Suggested type | Nullability / constraint | Purpose |
+|---|---|---|---|
+| `id` | UUID | PK, required | History entry identifier |
+| `repair_order_id` | UUID | Required FK to `repair_orders.id` | Related order |
+| `status` | VARCHAR(30) | Required; controlled values | Status reached |
+| `changed_at` | TIMESTAMPTZ | Required | Transition timestamp |
+| `observations` | TEXT | Optional | Reason or transition note |
 
-Each status transition creates a new history row. Historical records should not be overwritten when the current status changes.
+History is append-only from the application's perspective. On order creation, insert the initial history row. On each status transition, update `repair_orders.status` and insert a history record in the same transaction. Never update the current status without recording the transition.
 
 ## 3. Relationships
 
@@ -105,7 +108,7 @@ Each status transition creates a new history row. Historical records should not 
 erDiagram
     CLIENT ||--o{ ENGINE : owns
     ENGINE ||--o{ REPAIR_ORDER : has
-    CLIENT ||--o{ REPAIR_ORDER : owns
+    CLIENT ||--o{ REPAIR_ORDER : associated_with
     REPAIR_ORDER ||--|{ REPAIR_STATUS_HISTORY : records
 
     CLIENT {
@@ -114,9 +117,9 @@ erDiagram
         string document_type
         string document_number UK
         string email
+        string phone
         boolean is_active
     }
-
     ENGINE {
         uuid id PK
         string serial_number UK
@@ -127,7 +130,6 @@ erDiagram
         uuid client_id FK
         boolean is_active
     }
-
     REPAIR_ORDER {
         uuid id PK
         string order_number UK
@@ -138,7 +140,6 @@ erDiagram
         datetime estimated_delivery_at
         datetime actual_delivery_at
     }
-
     REPAIR_STATUS_HISTORY {
         uuid id PK
         uuid repair_order_id FK
@@ -148,53 +149,72 @@ erDiagram
     }
 ```
 
-The `users` entity is intentionally omitted from this business ER diagram because it belongs to the separate authentication database.
+The `users` entity is omitted because it belongs to the separate authentication database.
 
-## 4. Initial repair statuses
+## 4. Repair statuses and transition rules
 
-Use a controlled set of status values corresponding to the repair lifecycle:
+Initial controlled statuses:
 
-1. `RECEIVED` — received.
-2. `IN_DIAGNOSIS` — in diagnosis.
-3. `AWAITING_APPROVAL` — awaiting approval.
-4. `IN_REPAIR` — in repair.
-5. `IN_TESTING` — in testing.
-6. `COMPLETED` — completed.
-7. `DELIVERED` — delivered.
+| Identifier | Meaning |
+|---|---|
+| `RECEIVED` | Received |
+| `IN_DIAGNOSIS` | In diagnosis |
+| `AWAITING_APPROVAL` | Awaiting client approval |
+| `IN_REPAIR` | In repair |
+| `IN_TESTING` | In testing |
+| `COMPLETED` | Completed |
+| `DELIVERED` | Delivered |
 
-These values are proposed stable API/database identifiers. The user interface can display localized labels. Valid transitions should be enforced in the business use case rather than allowing arbitrary status changes.
+Initial proposed transitions:
+- `RECEIVED → IN_DIAGNOSIS`
+- `IN_DIAGNOSIS → AWAITING_APPROVAL`
+- `AWAITING_APPROVAL → IN_REPAIR` only after approval has been recorded.
+- `IN_REPAIR → IN_TESTING`
+- `IN_TESTING → COMPLETED`
+- `IN_TESTING → IN_REPAIR` if testing fails.
+- `COMPLETED → DELIVERED`
 
-When a repair order is created, its initial status must also be inserted into `repair_status_history`. The update of the current status and insertion of the history record should occur in one database transaction.
+The application use case must reject arbitrary transitions. The assessment's approval requirements need a concrete representation before implementation: the current minimal model does not yet include an approval entity or approval fields. Before implementing the approval gate, decide whether a small set of fields (for example, approval status and timestamp) is sufficient or whether a separate approval record is required. Do not claim that approval is persisted until that decision is implemented.
 
-## 5. Key constraints and integrity rules
+## 5. Constraints, indexes, and deletion policy
 
-- User email is unique in the authentication database.
-- Client document type + document number is unique.
-- Engine serial number is unique.
-- Repair order number is unique.
-- Every engine references an existing client.
-- Every repair order references an existing engine and its owning client.
-- Every history row references an existing repair order.
-- The current order status and the new history row are updated atomically.
-- Referenced business records should generally be deactivated rather than physically deleted.
-- API validation provides clear errors, while database constraints remain the final integrity guard.
+Recommended constraints:
+- Unique normalized user email.
+- Unique client `(document_type, document_number)`.
+- Unique engine `serial_number`.
+- Unique engine `(id, client_id)` to support the composite FK.
+- Unique repair `order_number`.
+- Foreign keys from engines to clients, repair orders to the matching engine/client pair, and history to repair orders.
+- Controlled role and status values.
+- Non-null required fields as shown in the entity tables.
+
+Recommended indexes:
+- `clients(document_type, document_number)` (unique constraint/index).
+- `engines(serial_number)` (unique constraint/index).
+- `engines(client_id)`.
+- `repair_orders(order_number)` (unique constraint/index).
+- `repair_orders(status)`.
+- `repair_orders(engine_id)` and `repair_orders(client_id)` as useful for query patterns and FK operations.
+- `repair_status_history(repair_order_id, changed_at)` for chronological order history.
+
+Use logical deactivation for clients and engines that have dependent records. Do not physically delete repair orders or status history during normal operations. Database constraints are the final integrity guard; API validation should produce clear client-facing errors.
 
 ## 6. SQLModel and Alembic considerations
 
-- SQLModel persistence models belong to the infrastructure layer of the FastAPI service.
+- SQLModel persistence models belong in the FastAPI infrastructure layer.
 - Domain entities and API schemas should not be coupled to database tables without a deliberate reason.
 - Alembic migrations define and version schema changes.
-- Alembic's environment must import/register every persistence model so that autogeneration can detect metadata.
+- Alembic's environment must import/register all persistence models so autogeneration can detect their metadata.
 - Review autogenerated migrations before applying them.
-- Use UUID identifiers and timezone-aware timestamps consistently.
-- Use database transactions for operations that must update multiple related rows.
+- Use UUIDs and timezone-aware timestamps consistently.
+- Use transactions for operations that update multiple related rows.
+- Do not use `SQLModel.metadata.create_all()` as the normal production/local schema migration mechanism; use Alembic.
 
-## 7. Decisions to confirm during implementation
+## 7. Implementation decisions to revisit only if requirements demand them
 
-The approved conceptual design leaves these implementation details to be settled when the requirements and exact field definitions are mapped into code:
-- Whether client email is required.
-- Whether capacity should be numeric with a unit column or stored as a descriptive string.
-- The exact allowed role values and permissions.
-- The format/generation strategy for repair order numbers.
-- Whether a technician remains a text reference or later becomes a separate entity.
-- The exact status transition matrix and whether cancellation is required by the assessment.
+- The capacity field is initially a descriptive string; switch to numeric capacity plus unit only if the assessment requires calculation/filtering by capacity.
+- Technician is initially stored as a name; create a separate technician entity only if technician management is in scope.
+- The role set is `ADMIN` and `OPERATOR`; permissions are documented in `docs/api-contract.md`.
+- Repair order numbering must be implemented with a concurrency-safe generation strategy.
+- Approval persistence must be defined before enforcing the `AWAITING_APPROVAL` transition.
+- Cancellation is not included in the initial status set unless the assessment requirements call for it.
