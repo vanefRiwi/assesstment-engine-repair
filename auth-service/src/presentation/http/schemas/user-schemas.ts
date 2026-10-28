@@ -6,12 +6,16 @@ const email = z.email().max(254);
 const password = z.string().min(8).max(128);
 const role = z.enum(ROLES);
 
-export const loginSchema = z.object({
-  email,
-  password: z.string().min(1).max(128),
-});
+// Reject unexpected properties consistently instead of silently accepting
+// client-supplied fields such as id, is_active, or password_hash.
+export const loginSchema = z
+  .object({
+    email,
+    password: z.string().min(1).max(128),
+  })
+  .strict();
 
-export const createUserSchema = z.object({ name, email, password, role });
+export const createUserSchema = z.object({ name, email, password, role }).strict();
 
 export const updateUserSchema = z
   .object({ name: name.optional(), role: role.optional() })
