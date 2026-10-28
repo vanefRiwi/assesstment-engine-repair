@@ -1,0 +1,45 @@
+[project]
+name = "business-service"
+version = "0.1.0"
+description = "Business API for clients, engines and repair orders"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlmodel>=0.0.22",
+    "psycopg[binary]>=3.2",
+    "pyjwt[crypto]>=2.9",
+    "pydantic-settings>=2.4",
+    "email-validator>=2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "httpx>=0.27",
+    "ruff>=0.6",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/business_service"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = ["postgres: tests that need a PostgreSQL database (TEST_DATABASE_URL)"]
+filterwarnings = ["ignore::DeprecationWarning:starlette.*", "ignore:Using `httpx`"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["fastapi.Depends", "fastapi.Query"]
