@@ -100,6 +100,7 @@ The human-readable `order_number` must be generated safely under concurrent requ
 | `id` | UUID | PK, required | History entry identifier |
 | `repair_order_id` | UUID | Required FK to `repair_orders.id` | Related order |
 | `status` | VARCHAR(30) | Required; controlled values | Status reached |
+| `changed_by` | UUID | Optional, no FK | User id (`sub` claim) of who made the change; plain reference to the auth service |
 | `changed_at` | TIMESTAMPTZ | Required | Transition timestamp |
 | `observations` | TEXT | Optional | Reason or transition note |
 
@@ -175,7 +176,10 @@ Initial proposed transitions:
 - `IN_REPAIR → IN_TESTING`
 - `IN_TESTING → COMPLETED`
 - `IN_TESTING → IN_REPAIR` if testing fails.
-- `COMPLETED → DELIVERED`
+- `COMPLETED → DELIVERED` (sets `actual_delivery_at`).
+- `AWAITING_APPROVAL → IN_DIAGNOSIS` to revise the proposal after a rejection; re-entering `AWAITING_APPROVAL` resets the approval to `PENDING`.
+
+`order_number` is generated from the PostgreSQL sequence `repair_order_number_seq` as `REP-<year>-<000001>`. An engine's owner cannot be changed once it has repair orders (`409`), so the composite foreign key never forces rewriting old orders.
 
 The application use case must reject arbitrary transitions. Approval is represented on `repair_orders` for the initial scope:
 

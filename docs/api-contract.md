@@ -139,7 +139,15 @@ Request:
 { "is_active": false }
 ```
 
-Returns `200 OK` with public user fields after the update. Consider safeguards against self-deactivation or deactivation of the last active administrator; settle exact behavior before implementation.
+Returns `200 OK` with public user fields after the update. Safeguards: an admin cannot deactivate their own account, and the last active administrator cannot be deactivated (`400`). Inactive users cannot sign in.
+
+### `GET /api/v1/users/{user_id}`
+
+Requires `ADMIN`. Returns public user fields, `404` if the user does not exist.
+
+### `PATCH /api/v1/users/{user_id}`
+
+Requires `ADMIN`. Updates `name` and/or `role` (at least one). An admin cannot change their own role, and the last active administrator cannot be demoted (`400`). Unknown fields return `422`.
 
 ## 5. FastAPI business endpoints
 
@@ -151,16 +159,26 @@ All endpoints are under `/api/v1`. Except for health, all require a valid Bearer
 | POST | `/clients` | ADMIN, OPERATOR | Create client | 201 |
 | GET | `/clients` | ADMIN, OPERATOR | List clients | 200 |
 | GET | `/clients/{client_id}` | ADMIN, OPERATOR | Get client | 200 |
+| PATCH | `/clients/{client_id}` | ADMIN, OPERATOR | Edit name, email, phone or `is_active` | 200 |
 | POST | `/engines` | ADMIN, OPERATOR | Register engine | 201 |
 | GET | `/engines` | ADMIN, OPERATOR | List engines | 200 |
 | GET | `/engines/{engine_id}` | ADMIN, OPERATOR | Get engine | 200 |
+| PATCH | `/engines/{engine_id}` | ADMIN, OPERATOR | Edit engine data, owner (only without orders) or `is_active` | 200 |
 | POST | `/repair-orders` | ADMIN, OPERATOR | Create order and initial history row | 201 |
 | GET | `/repair-orders` | ADMIN, OPERATOR | List repair orders | 200 |
+| GET | `/repair-orders/summary` | ADMIN, OPERATOR | Order count per status (dashboard) | 200 |
 | GET | `/repair-orders/{order_id}` | ADMIN, OPERATOR | Get repair order | 200 |
 | PATCH | `/repair-orders/{order_id}/status` | ADMIN, OPERATOR | Perform a valid status transition | 200 |
+| PATCH | `/repair-orders/{order_id}/approval` | ADMIN, OPERATOR | Record `APPROVED` / `REJECTED` while awaiting approval | 200 |
 | GET | `/repair-orders/{order_id}/history` | ADMIN, OPERATOR | Read chronological status history | 200 |
 
-Pagination/filtering may be added consistently when the list endpoint schemas are finalized.
+List endpoints return `{ "items": [...], "total", "limit", "offset" }` and accept `limit` (1–100, default 50) and `offset`. Filters:
+
+- `GET /clients`: `q` (name or document number), `is_active`.
+- `GET /engines`: `q` (serial, manufacturer or model), `client_id`, `is_active`.
+- `GET /repair-orders`: `status`, `client_id`, `engine_id`, `q` (order number, reported problem or technician).
+
+Request bodies reject unknown fields (`422`). Datetimes in requests must include a timezone.
 
 ### Representative business request payloads
 
@@ -202,13 +220,24 @@ The server generates `id`, `order_number`, initial status, and audit timestamps.
 
 Approval state is part of the repair-order resource. The initial scope does not expose a separate approval-history endpoint; the business service must validate and persist approval changes consistently. The exact route and request schema for recording a client decision should be finalized alongside implementation, without bypassing the approval gate.
 
-Change status:
+Change status (the optional technical fields are saved together with the transition):
 ```json
 {
   "status": "IN_DIAGNOSIS",
-  "observations": "Initial inspection started"
+  "observations": "Initial inspection started",
+  "technical_diagnosis": "Worn turbocharger",
+  "repair_description": "Replace turbocharger and seals",
+  "technician_name": "Laura Gómez",
+  "estimated_delivery_at": "2026-11-05T17:00:00Z"
 }
 ```
+
+Record the client's decision (only while the order is `AWAITING_APPROVAL`):
+```json
+{ "decision": "APPROVED", "notes": "Approved by phone" }
+```
+
+`client_id` is optional when creating an order: the service takes it from the engine's owner and rejects a different value with `400`.
 
 The business use case validates the transition, updates the order's current status, and inserts a history row atomically. Invalid transitions are rejected. Approval is stored on `repair_orders` using `approval_status`, `approved_at`, and `approval_notes`. When approval is required, set `approval_status` to `PENDING`; only `APPROVED` permits transition from `AWAITING_APPROVAL` to `IN_REPAIR`. `NOT_REQUIRED` is reserved for orders that do not require client approval.
 

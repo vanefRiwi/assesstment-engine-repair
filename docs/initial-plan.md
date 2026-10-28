@@ -16,14 +16,14 @@ This plan tracks the work needed to satisfy the assessment statement. The approv
 5. The operator advances the order through valid transitions, including the approval rule, and sees the history.
 6. The business API rejects missing, expired, tampered, or wrong issuer/audience tokens.
 
-## 2. Gaps between the statement and the current documentation
+## 2. Gaps closed during implementation
 
-These items are required or explicitly valued by the statement and are not yet covered by the approved documents:
+These items were required or valued by the statement and were missing from the first version of the documents. All of them are now implemented and documented:
 
 - **Editing clients and engines.** Section 4.5 asks for list, create, edit and detail views; section 3 says no modification flow is required. Decision: add `PATCH /clients/{id}` and `PATCH /engines/{id}` (including logical deactivation) so both readings are covered. Repair orders are only created, listed, viewed, and moved through status transitions.
 - **Repair order filters.** Section 4.5 asks for search and filters by status, client or engine. Define query parameters (`status`, `client_id`, `engine_id`, `q`) and pagination for `GET /repair-orders`.
-- **Dashboard summary.** Section 4.5 asks for a summary of orders by status. Add `GET /repair-orders/summary` (counts per status) or document that the frontend aggregates the list.
-- **Approval endpoint.** Finalize the route and payload that record an approval decision (pending in the ADR follow-up).
+- **Dashboard summary.** Section 4.5 asks for a summary of orders by status. Implemented as `GET /repair-orders/summary` (counts per status).
+- **Approval endpoint.** Implemented as `PATCH /repair-orders/{id}/approval`.
 - **Delivery date.** Moving to `DELIVERED` sets `actual_delivery_date`.
 - **User update.** Section 4.1 asks for querying and updating users; the contract only has status changes. Add `GET /users/{id}` and `PATCH /users/{id}` (name, role).
 - **Key handling per environment.** Section 4.4 requires documenting how keys are configured in each environment: local generated files, CI-generated keys or GitHub Secrets, container environment variables.
@@ -42,13 +42,13 @@ These items are required or explicitly valued by the statement and are not yet c
 ## 4. Milestones
 
 - [x] Architecture, data model, API contract, and ADRs.
-- [ ] Close the gaps listed in section 2 in the documentation.
-- [ ] Confirm local tools and versions: Git, Node.js/npm, Python/UV, Docker.
-- [ ] Initialize the three projects.
-- [ ] Database init script, migrations, admin bootstrap, and health checks.
-- [ ] Auth API and tests.
-- [ ] Business API and tests.
-- [ ] Frontend integrated end to end.
-- [ ] Docker Compose.
-- [ ] GitHub Actions pipeline and evidence of a green run.
-- [ ] README (install, configure, run, test) and final technical documentation.
+- [x] Close the gaps listed in section 2 in the documentation.
+- [x] Confirm local tools and versions: Git, Node.js/npm, Python/UV, Docker.
+- [x] Initialize the three projects.
+- [x] Database init script, migrations, admin bootstrap, and health checks.
+- [x] Auth API and tests.
+- [x] Business API and tests.
+- [x] Frontend integrated end to end.
+- [x] Docker Compose.
+- [x] GitHub Actions pipeline (evidence: the Actions tab of the repository).
+- [x] README (install, configure, run, test) and final technical documentation.

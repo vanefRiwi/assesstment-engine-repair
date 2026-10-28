@@ -188,3 +188,17 @@ Refresh tokens are out of the initial scope; when an access token expires, the u
 - Keep authentication and business persistence isolated.
 - Use reviewed migrations and test them against a clean database.
 - Preserve repair-order history; prefer logical deactivation of referenced clients and engines over physical deletion.
+
+## 11. JWT key management per environment
+
+| Environment | Private key (auth-service only) | Public key (business-service only) |
+|---|---|---|
+| Local without Docker | `npm run keys:generate` writes `auth-service/secrets/jwt-private.pem` (git-ignored); `JWT_PRIVATE_KEY_PATH` points to it | `JWT_PUBLIC_KEY_PATH` points to `auth-service/secrets/jwt-public.pem` |
+| Docker Compose | The one-shot `jwt-keys` job generates the pair on first start into the `jwt-private` volume | Written to the `jwt-public` volume; business-service mounts only this volume, read-only |
+| CI unit/API tests | Each test run generates a throwaway key pair in memory; no secret is stored in GitHub | Same throwaway pair |
+| CI end-to-end | Same as Docker Compose, inside the runner; volumes are deleted at the end (`docker compose down -v`) | Same |
+| Deployed environment | Injected from a secret manager or GitHub Secrets as `JWT_PRIVATE_KEY` (PEM content) or a mounted file | Distributed as `JWT_PUBLIC_KEY` or a mounted file; it is not secret, but only verifiers receive it |
+
+Rotation: issue tokens with a new `JWT_KEY_ID` and private key, keep the old public key available to
+verifiers for at least the token lifetime (15 minutes), then remove it. Because RS256 is asymmetric,
+the business service can verify tokens but can never issue them.
