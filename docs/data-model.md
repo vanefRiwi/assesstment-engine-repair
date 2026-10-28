@@ -26,7 +26,7 @@ Types below are logical PostgreSQL recommendations. Concrete SQLModel declaratio
 | `created_at` | TIMESTAMPTZ | Required | Creation timestamp |
 | `updated_at` | TIMESTAMPTZ | Required | Last update timestamp |
 
-Normalize email consistently (for example, trim whitespace and lowercase) and enforce uniqueness in the database. Never store plaintext passwords; use Argon2id or another approved modern password-hashing algorithm. Public registration, if supported, defaults to `OPERATOR`; callers cannot assign themselves `ADMIN`.
+Normalize email consistently (for example, trim whitespace and lowercase) and enforce uniqueness in the database. Never store plaintext passwords; use Argon2id or another approved modern password-hashing algorithm. Public self-registration is disabled in the initial scope. Only an authenticated `ADMIN` may create users; the server validates allowed roles, and the first administrator is provisioned through a controlled bootstrap procedure.
 
 ### 2.2 `clients` — business database
 
@@ -78,6 +78,9 @@ Integrity rules: serial number is unique and `client_id` references an existing 
 | `estimated_delivery_at` | TIMESTAMPTZ | Optional | Estimated delivery |
 | `actual_delivery_at` | TIMESTAMPTZ | Optional | Actual delivery, when delivered |
 | `status` | VARCHAR(30) | Required; controlled values | Current lifecycle status |
+| `approval_status` | VARCHAR(20) | Required; default `NOT_REQUIRED`; controlled values | Current client-approval decision |
+| `approved_at` | TIMESTAMPTZ | Optional | Timestamp when approval was recorded |
+| `approval_notes` | TEXT | Optional | Notes about the approval request or decision |
 | `observations` | TEXT | Optional | Additional notes |
 | `created_at` | TIMESTAMPTZ | Required | Creation timestamp |
 | `updated_at` | TIMESTAMPTZ | Required | Last update timestamp |
@@ -174,7 +177,23 @@ Initial proposed transitions:
 - `IN_TESTING → IN_REPAIR` if testing fails.
 - `COMPLETED → DELIVERED`
 
-The application use case must reject arbitrary transitions. The assessment's approval requirements need a concrete representation before implementation: the current minimal model does not yet include an approval entity or approval fields. Before implementing the approval gate, decide whether a small set of fields (for example, approval status and timestamp) is sufficient or whether a separate approval record is required. Do not claim that approval is persisted until that decision is implemented.
+The application use case must reject arbitrary transitions. Approval is represented on `repair_orders` for the initial scope:
+
+| `approval_status` | Meaning |
+|---|---|
+| `NOT_REQUIRED` | This repair does not require client approval. |
+| `PENDING` | Approval has been requested and a decision is pending. |
+| `APPROVED` | Client approval has been recorded. |
+| `REJECTED` | Client declined the proposed repair. |
+
+Rules:
+- Orders that require approval must be set to `PENDING` when the approval request is issued; orders that do not require it use `NOT_REQUIRED`.
+- A transition from `AWAITING_APPROVAL` to `IN_REPAIR` is permitted only when `approval_status = APPROVED`.
+- `approved_at` is populated when approval is recorded and remains null otherwise. When a decision is changed or rejected, the implementation must keep timestamp semantics consistent; do not treat `approved_at` as a general decision timestamp.
+- `approval_notes` records relevant context but is not a substitute for a full audit log.
+- Record the order's status transitions in `repair_status_history` in the same transaction as the status update.
+
+This model stores the current approval state, not a complete history of approval requests and decisions. If the assessment requires multiple estimates, repeated approval cycles, or an audit trail of every approval decision, introduce a separate `repair_approvals` entity in a later, explicitly scoped change.
 
 ## 5. Constraints, indexes, and deletion policy
 
@@ -185,7 +204,8 @@ Recommended constraints:
 - Unique engine `(id, client_id)` to support the composite FK.
 - Unique repair `order_number`.
 - Foreign keys from engines to clients, repair orders to the matching engine/client pair, and history to repair orders.
-- Controlled role and status values.
+- Controlled role, repair status, and approval status values.
+- Approval consistency: `approved_at` is populated only when approval has been granted; `IN_REPAIR` cannot be entered from `AWAITING_APPROVAL` unless approval status is `APPROVED`.
 - Non-null required fields as shown in the entity tables.
 
 Recommended indexes:
@@ -216,5 +236,5 @@ Use logical deactivation for clients and engines that have dependent records. Do
 - Technician is initially stored as a name; create a separate technician entity only if technician management is in scope.
 - The role set is `ADMIN` and `OPERATOR`; permissions are documented in `docs/api-contract.md`.
 - Repair order numbering must be implemented with a concurrency-safe generation strategy.
-- Approval persistence must be defined before enforcing the `AWAITING_APPROVAL` transition.
+- The initial approval persistence decision is the four-state `approval_status` plus `approved_at` and `approval_notes` fields on `repair_orders`; use a separate approval entity only if the requirements call for a full decision history.
 - Cancellation is not included in the initial status set unless the assessment requirements call for it.
