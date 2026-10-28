@@ -86,6 +86,15 @@ Las imágenes de la aplicación siempre se construyen desde el código (`pull_po
 no intenta descargarlas de ningún registro. La primera vez tarda unos minutos porque instala dependencias;
 las siguientes reutilizan la caché y arrancan en segundos. Para ver el estado: `docker compose ps`.
 
+En Windows, si `postgres` termina con código 126, el repo se clonó con finales de línea CRLF antes de que
+existiera `.gitattributes`. Se arregla una sola vez:
+
+```bash
+git rm --cached -r -q . && git reset --hard   # vuelve a escribir los .sh con LF
+docker compose down -v                         # borra la base a medio crear
+docker compose up -d
+```
+
 Al arrancar, Compose:
 
 1. Inicia PostgreSQL y, la primera vez, ejecuta `docker/postgres/init-databases.sh`, que crea `auth_db` y
