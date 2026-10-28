@@ -47,7 +47,19 @@ export class JwtTokenService implements TokenService {
       throw new UnauthorizedError("The access token is invalid or has expired.");
     }
 
-    if (typeof payload === "string" || !payload.sub || !ROLES.includes(payload.role as Role)) {
+    // Require the claims this service issues, rather than accepting a signed
+    // token that omits expiration or token identifiers.
+    if (
+      typeof payload === "string" ||
+      typeof payload.sub !== "string" ||
+      payload.sub.length === 0 ||
+      !ROLES.includes(payload.role as Role) ||
+      !Number.isFinite(payload.iat) ||
+      !Number.isFinite(payload.exp) ||
+      (payload.exp as number) <= (payload.iat as number) ||
+      typeof payload.jti !== "string" ||
+      payload.jti.length === 0
+    ) {
       throw new UnauthorizedError("The access token is invalid or has expired.");
     }
     return { sub: payload.sub, role: payload.role as Role };

@@ -25,6 +25,13 @@ export const errorHandler: ErrorRequestHandler = (error, req, res, _next) => {
     return;
   }
 
-  console.error(error);
+  // Do not log raw error objects: database/driver errors may contain SQL or
+  // parameters. Keep this fallback intentionally free of request bodies,
+  // headers, tokens, connection strings, and error messages.
+  console.error("Unhandled HTTP error", {
+    errorName: error instanceof Error ? error.name : "UnknownError",
+    method: req.method,
+    path: req.path,
+  });
   sendProblem(res, 500, "Internal Server Error", "An unexpected error occurred.", req.originalUrl);
 };
