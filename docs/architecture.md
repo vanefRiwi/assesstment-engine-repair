@@ -41,7 +41,7 @@ This is a logical view. In Clean Architecture, dependencies point inward: infras
 ### 4.1 Authentication service — Express
 
 Owns:
-- User registration and administration.
+- Admin-controlled user creation and administration; public self-registration is not part of the initial scope.
 - Password hashing and credential verification.
 - User roles and active/inactive status.
 - Login and issuance of signed access tokens.
@@ -154,14 +154,14 @@ FastAPI validates the algorithm, signature, issuer, audience, expiration, subjec
 Initial role policy:
 - `ADMIN`: user administration and all business operations.
 - `OPERATOR`: routine client, engine, and repair-order operations; cannot administer users.
-- Public registration, if enabled, must never allow a caller to self-assign `ADMIN`; new public registrations default to `OPERATOR`. Admin creation requires an admin-controlled process or bootstrap.
+- Public self-registration is disabled in the initial scope. Only an authenticated `ADMIN` may create users, and the server validates the assigned role. The first administrator is provisioned through a controlled bootstrap procedure; no public endpoint may create an administrator.
 
 Refresh tokens are out of the initial scope; when an access token expires, the user signs in again.
 
 ## 8. API conventions
 
 - Prefix endpoints with `/api/v1`.
-- Express owns `/api/v1/auth/*` and `/api/v1/users/*`; FastAPI owns business endpoints.
+- Express owns `/api/v1/auth/*` and `/api/v1/users/*`; FastAPI owns business endpoints. User creation is admin-only (`POST /api/v1/users`); there is no public `POST /api/v1/auth/register` in the initial scope.
 - Use JSON request and response bodies, consistent validation, and explicit status codes.
 - Use `application/problem+json` for API errors, following RFC 9457 conventions.
 - Keep API schemas separate from domain entities and persistence models.
@@ -170,7 +170,7 @@ Refresh tokens are out of the initial scope; when an access token expires, the u
 
 ## 9. Initial implementation sequence
 
-1. Confirm and document the domain model and service contracts.
+1. Confirm and document the domain model, approval rules, and service contracts.
 2. Initialize the application projects in a separate, explicitly approved step.
 3. Configure PostgreSQL ownership, settings, and migrations.
 4. Implement authentication, JWT issuance, and tests.
