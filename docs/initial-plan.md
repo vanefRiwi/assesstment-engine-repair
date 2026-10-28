@@ -1,83 +1,54 @@
 # Initial Technical Planning
 
-## 1. Business workflow
+This plan tracks the work needed to satisfy the assessment statement. The approved design lives in:
 
-The first end-to-end acceptance scenario is:
+- [architecture.md](architecture.md): services, layers, persistence, JWT.
+- [data-model.md](data-model.md): tables, constraints, statuses, transitions.
+- [api-contract.md](api-contract.md): endpoints, claims, roles, errors.
+- [decisions.md](decisions.md): ADRs (approval state, admin-only users, ownership boundaries).
 
-1. An authorized user signs in through the authentication API.
-2. The frontend receives a signed JWT.
-3. The user registers a client.
-4. The user registers an engine linked to that client.
-5. The user creates a repair order for the engine (the client is derived from the engine owner).
-6. The user views the order details, advances its status, and sees the status history.
-7. The business API rejects requests without a valid JWT (missing, expired, bad signature, wrong issuer/audience).
+## 1. End-to-end acceptance scenario
 
-## 2. Domain entities
+1. An administrator (bootstrapped) signs in through the authentication API and creates an operator.
+2. The operator signs in and the frontend stores the RS256 access token.
+3. The operator registers a client and an engine owned by that client.
+4. The operator creates a repair order for the engine; the order starts in `RECEIVED` with its first history row.
+5. The operator advances the order through valid transitions, including the approval rule, and sees the history.
+6. The business API rejects missing, expired, tampered, or wrong issuer/audience tokens.
 
-- **User** (auth service): id, name, email (unique), password hash, role (`ADMIN` | `OPERATOR`), active flag, created/updated timestamps.
-- **Client** (business service): id, legal name, document type, document number, email, active flag, created/updated timestamps.
-- **Engine** (business service): id, unique serial number/internal code, manufacturer, model, engine type, power/capacity (free text), client reference, registration date, active flag.
-- **RepairOrder** (business service): id, unique order number, engine and client references, received date, reported problem, technical diagnosis, work performed/required, technician name (free-text reference, not a user), estimated delivery date, actual delivery date, current status, notes, created/updated timestamps.
-- **RepairStatusHistory** (business service): id, repair order reference, previous status, new status, changed at, changed by (user id taken from the JWT `sub`), optional note.
+## 2. Gaps between the statement and the current documentation
 
-Repair statuses: `RECEIVED`, `IN_DIAGNOSIS`, `AWAITING_APPROVAL`, `IN_REPAIR`, `IN_TESTING`, `FINISHED`, `DELIVERED`.
+These items are required or explicitly valued by the statement and are not yet covered by the approved documents:
 
-## 3. Relationships and integrity rules
+- **Editing clients and engines.** Section 4.5 asks for list, create, edit and detail views; section 3 says no modification flow is required. Decision: add `PATCH /clients/{id}` and `PATCH /engines/{id}` (including logical deactivation) so both readings are covered. Repair orders are only created, listed, viewed, and moved through status transitions.
+- **Repair order filters.** Section 4.5 asks for search and filters by status, client or engine. Define query parameters (`status`, `client_id`, `engine_id`, `q`) and pagination for `GET /repair-orders`.
+- **Dashboard summary.** Section 4.5 asks for a summary of orders by status. Add `GET /repair-orders/summary` (counts per status) or document that the frontend aggregates the list.
+- **Approval endpoint.** Finalize the route and payload that record an approval decision (pending in the ADR follow-up).
+- **Delivery date.** Moving to `DELIVERED` sets `actual_delivery_date`.
+- **User update.** Section 4.1 asks for querying and updating users; the contract only has status changes. Add `GET /users/{id}` and `PATCH /users/{id}` (name, role).
+- **Key handling per environment.** Section 4.4 requires documenting how keys are configured in each environment: local generated files, CI-generated keys or GitHub Secrets, container environment variables.
+- **Frontend views.** Login, dashboard, clients, engines, repair orders (list with filters, create), order detail with history and status update, and admin user management. Protected routes, logout on token expiry, validated forms, loading and error states.
+- **Database initialization.** Init script that creates both databases and service users, Alembic migrations for business, migrations for auth, and the admin bootstrap script.
+- **Docker Compose** for PostgreSQL, both APIs, and the frontend.
+- **CI/CD.** GitHub Actions on pull requests and pushes to `main`: lint/type check, tests and build per component. Nice to have: build Docker images.
+- **Evidence.** Screenshots or links to a green pipeline and test runs.
 
-- One client can own multiple engines; one engine can have multiple repair orders over time.
-- A repair order is created from an engine; its client is taken from the engine owner (or validated to match it).
-- Inactive clients or engines cannot receive new repair orders.
-- Client document type + number must be unique; engine serial number must be unique (duplicates return `409 Conflict`).
-- Order numbers are generated by the system (e.g. `RO-2026-000123`) and are unique.
-- Creating an order writes the first history record with status `RECEIVED`.
-- Status changes follow the defined sequence (with `AWAITING_APPROVAL` able to return to `IN_DIAGNOSIS`); invalid transitions return `400`/`422`.
-- Moving to `DELIVERED` sets the actual delivery date.
-- Status history is append-only.
-- `changed_by` and technician values are plain references: there are no foreign keys across service databases.
+## 3. Testing strategy
 
-## 4. Architecture decisions
-
-- Monorepo with independently runnable services and frontend.
-- One PostgreSQL server locally with two databases (`auth_db`, `business_db`) and service-specific credentials, created by an init script. Neither service reads the other's tables; the only shared contract is the JWT.
-- **Scope of editing:** the specification is inconsistent (section 3 says no modification flow; section 4.5 asks for editing clients/engines and updating order status). Decision: implement create/list/detail for all entities, edit for clients and engines, and status updates for repair orders. Other order fields are not editable.
-- **Business service structure (clean architecture):** `domain` (entities, repository contracts, exceptions), `application` (one use case per class), `infrastructure` (SQLModel tables, repositories, DB session), `presentation` (routers, Pydantic schemas, dependency wiring, JWT dependency), `shared` (config). ORM models live in infrastructure so the domain does not depend on the ORM. Migrations with Alembic.
-- **Auth service structure:** routes → controllers → services → repositories, with zod validation, a central error middleware, bcrypt/argon2 hashing, and a migration tool for its schema.
-- Consistent error body in both APIs: `{ "error": { "code", "message", "details" } }`.
-
-## 5. JWT and secrets
-
-- Algorithm: **RS256**. The auth service signs with a private key; the business service only holds the public key, so it can verify tokens but never issue them.
-- Claims: `sub` (user id), `email`, `role`, `iat`, `exp`, `iss`, `aud`. Short expiry (e.g. 15 min).
-- FastAPI verifies signature, algorithm (explicit allow-list), expiry, issuer, audience, and required claims via a `get_current_user` dependency; role checks via a `require_role` dependency.
-- Keys per environment: local `.env` files (generated keys, never committed); CI uses keys generated during the job or GitHub Secrets; containers receive them as environment variables. This is documented in the README.
-- Fallback if time is short: HS256 with a shared secret, documented as a trade-off.
-
-## 6. API overview (to be detailed in docs)
-
-- Auth: `POST /auth/register`, `POST /auth/login`, `GET /auth/me`, `GET /users`, `GET /users/:id`, `PATCH /users/:id`, `PATCH /users/:id/deactivate` (admin only for user management). The first admin is created by a seed script.
-- Business: CRUD for `/clients` and `/engines` (soft deactivation); `/repair-orders` with create, list (filters: status, client, engine, text search; pagination), detail, `PATCH /repair-orders/{id}/status`, `GET /repair-orders/{id}/history`, and `GET /repair-orders/summary` (counts by status for the dashboard). OpenAPI at `/docs`.
-
-## 7. Frontend views
-
-Login; dashboard (orders by status); clients (list, create, edit, detail); engines (list, create, edit, detail); repair orders (list with search and filters by status/client/engine, create); order detail (full data, history, status update); user administration for admins (optional). Protected routes, session handling with logout on token expiry, validated forms, loading indicators, and clear success/error messages.
-
-## 8. Testing and CI
-
-- Auth: unit tests for services and integration tests for endpoints (Jest/Vitest + Supertest).
-- Business: unit tests of use cases with in-memory repositories, plus API tests with `TestClient` including JWT rejection cases (pytest).
+- Auth: unit tests for services and endpoint tests (Supertest), including role checks and inactive users.
+- Business: use case tests with in-memory repositories (no database) and API tests with `TestClient`, including JWT rejection cases, duplicate validation (409), and invalid transitions.
 - Frontend: type check, build, and a few component tests.
-- GitHub Actions on pull requests and pushes to `main`: one job per component running lint/type check, tests, and build. Nice to have: build Docker images.
 
-## 9. Deliverables checklist
+## 4. Milestones
 
-- [ ] Confirm local tools and versions: Git, Node.js/npm, Python/uv, Docker.
-- [ ] Architecture diagram and ER diagram (including User and cross-service references).
-- [ ] API endpoint contracts and common error format.
+- [x] Architecture, data model, API contract, and ADRs.
+- [ ] Close the gaps listed in section 2 in the documentation.
+- [ ] Confirm local tools and versions: Git, Node.js/npm, Python/UV, Docker.
 - [ ] Initialize the three projects.
-- [ ] Database init script, migrations, admin seed, and health checks.
+- [ ] Database init script, migrations, admin bootstrap, and health checks.
 - [ ] Auth API and tests.
 - [ ] Business API and tests.
 - [ ] Frontend integrated end to end.
-- [ ] Docker Compose for all services and PostgreSQL.
+- [ ] Docker Compose.
 - [ ] GitHub Actions pipeline and evidence of a green run.
-- [ ] README (install, configure, run, test) and technical documentation (architecture, data model, endpoints, inter-service authentication).
+- [ ] README (install, configure, run, test) and final technical documentation.
